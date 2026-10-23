@@ -1,0 +1,6 @@
+{
+  "name": "Tablora",
+  "description": "AI-powered spreadsheet cleaning and data quality workspace. Messy data in, clean data out.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
