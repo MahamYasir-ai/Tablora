@@ -1,0 +1,10 @@
+{
+  "name": "tablora",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tablora — An AI-Powered Spreadsheet Cleaning SaaS. Messy data in. Clean data out.",
+  "scripts": {
+    "build": "mkdir -p dist && cp index.html dist/ 2>/dev/null || cp index.html dist/",
+    "start": "serve ."
+  }
+}

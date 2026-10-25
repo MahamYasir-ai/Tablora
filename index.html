@@ -1,0 +1,1637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tablora — Messy data in. Clean data out.</title>
+  <meta name="description" content="AI-powered spreadsheet cleaning and data quality workspace. Clean, validate, transform, and export CSV and Excel files without writing code.">
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              navy: '#0F172A',
+              slate: '#334155',
+              sky: '#0284C7',
+              skyLight: '#E0F2FE',
+              teal: '#0D9488',
+              emerald: '#10B981',
+              emeraldLight: '#D1FAE5',
+              amber: '#F59E0B',
+              amberLight: '#FEF3C7',
+              rose: '#F43F5E',
+              roseLight: '#FFE4E6',
+              border: '#E2E8F0',
+              bg: '#F8FAFC'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- SheetJS (xlsx) for full Excel import and export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- PapaParse for robust CSV parsing and serialization -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <!-- React 18 & ReactDOM 18 -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel Standalone for in-browser JSX compilation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: #F8FAFC;
+      color: #0F172A;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #F1F5F9;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #CBD5E1;
+      border-radius: 3px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #94A3B8;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-brand-bg text-brand-navy antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // --- REALISTIC FICTIONAL SAMPLE DATASETS (Section 16) ---
+    const SAMPLE_DATASETS = {
+      customers: {
+        name: "Sample_Ecommerce_Customers_Messy.csv",
+        format: "CSV",
+        columns: ["Customer_ID", "Full_Name", "Email", "Phone_Number", "Signup_Date", "Lifetime_Spend", "Account_Status", "Postal_Code"],
+        rows: [
+          ["00142", " Alice Cooper ", "alice.cooper@example.com", "(555) 234-5678", "2023-01-15", "$1,450.00", "ACTIVE", "02134"],
+          ["00891", "BOB MARTIN", "bob.martin@company.org", "5559876543", "03/22/2023", "890.50", "active", "07001"],
+          ["00142", " Alice Cooper ", "alice.cooper@example.com", "(555) 234-5678", "2023-01-15", "$1,450.00", "ACTIVE", "02134"], // Exact duplicate
+          ["00315", "Renée Müller", "renee.muller@example.de", "+1 555-432-1098", "14-Aug-2023", "2,340.00", "Active", "01002"],
+          ["", "", "", "", "", "", "", ""], // Empty row
+          ["00488", "jane smith", "jane-invalid-email@", "123", "2023-05-18", "N/A", "PENDING", "90210"],
+          ["00502", "François  Dupont", "francois@example.fr", "(555) 876-5432", "11/04/2023", "$450.25", "pending", "08817"],
+          ["00620", "DAVID  WILLIAMS", "", "555-019-2834", "2023-09-01", "$3,100.00", "ACTIVE", "00501"], // Missing email
+          ["00711", "sarah connor", "sarah.c@sky.net", "555-111-2222", "2023-12-05", "150.00", "Suspended", "30301"],
+          ["00891", "BOB MARTIN", "bob.martin@company.org", "5559876543", "03/22/2023", "890.50", "active", "07001"], // Duplicate
+          ["00934", " Carlos Rodriguez ", "carlos.r@correo.es", "(555) 345-6789", "07/19/2023", "$5,210.80", "Active", "75001"],
+          ["00105", "EMILY  WATSON", "emily.watson@domain.com", "555.678.9012", "2023-04-10", "420.00", "ACTIVE", "06001"],
+          ["00233", "michael brown", "mbrown@", "(555) 789-0123", "2023-10-30", "zero", "CANCELLED", "10001"],
+          ["", "", "", "", "", "", "", ""], // Empty row
+          ["00677", "Olivia Taylor ", "olivia.t@example.org", "+1 (555) 901-2345", "12/28/2023", "$1,890.00", "Active", "94102"]
+        ]
+      },
+      sales: {
+        name: "Sample_Sales_Pipeline.csv",
+        format: "CSV",
+        columns: ["Deal_ID", "Company_Name", "Deal_Stage", "Estimated_Value", "Close_Date", "Sales_Rep"],
+        rows: [
+          ["D-1001", "Acme  Corporation", "Proposal", "$45,000.00", "2024-02-15", "John  Doe "],
+          ["D-1002", "Globex Inc", "CLOSED WON", "$120,500.00", "01/18/2024", "Jane Smith"],
+          ["D-1003", "Initech LLC ", "qualified", "15,000", "2024-03-30", "Bob Martin"],
+          ["D-1004", "Umbrella  Corp", "closed won", "$85,000", "2024-04-12", "John  Doe "],
+          ["D-1001", "Acme  Corporation", "Proposal", "$45,000.00", "2024-02-15", "John  Doe "],
+          ["D-1005", "Soylent Industries", "Discovery", "$25,000.00", "15/05/2024", "Sarah Connor"]
+        ]
+      },
+      inventory: {
+        name: "Sample_Inventory_SKU_Log.xlsx",
+        format: "XLSX",
+        columns: ["SKU_Code", "Item_Title", "Category", "In_Stock", "Unit_Price", "Supplier_Code"],
+        rows: [
+          ["004921", "Wireless Ergonomic Mouse ", "ELECTRONICS", "145", "$39.99", "SUP-01"],
+          ["008812", "Mechanical Keyboard RGB", "electronics", "28", "$119.50", "SUP-04"],
+          ["004921", "Wireless Ergonomic Mouse ", "ELECTRONICS", "145", "$39.99", "SUP-01"],
+          ["001205", "USB-C Braided Cable (2m)", "Accessories ", "out of stock", "$14.99", "SUP-02"],
+          ["009341", "Ultra-wide Monitor 34\"", "Electronics", "12", "$499.00", "SUP-01"]
+        ]
+      }
+    };
+
+    // --- DEFAULT BUILT-IN PRESETS (Section 10) ---
+    const DEFAULT_PRESETS = [
+      {
+        id: "preset_clean_customers",
+        name: "Clean Customer List",
+        description: "Removes empty & duplicate rows, trims whitespace, and standardizes emails.",
+        isBuiltIn: true,
+        operations: ["Remove Empty Rows", "Remove Exact Duplicate Rows", "Trim All Whitespace", "Normalize Internal Spaces", "Clean Email Addresses"]
+      },
+      {
+        id: "preset_prepare_sales",
+        name: "Prepare Sales Data",
+        description: "Discards blank rows, strips currency symbols, and cleans numeric fields.",
+        isBuiltIn: true,
+        operations: ["Remove Empty Rows", "Remove Exact Duplicate Rows", "Trim All Whitespace", "Clean & Convert to Numeric"]
+      },
+      {
+        id: "preset_standardize_contacts",
+        name: "Standardize Contact Information",
+        description: "Trims names, formats US phone numbers, and lowercases email addresses.",
+        isBuiltIn: true,
+        operations: ["Trim All Whitespace", "Normalize Internal Spaces", "Clean Email Addresses", "Standardize Phone Numbers"]
+      },
+      {
+        id: "preset_remove_empty",
+        name: "Remove Empty Records",
+        description: "Discards fully empty rows and columns, converting blanks to clean nulls.",
+        isBuiltIn: true,
+        operations: ["Remove Empty Rows", "Remove Empty Columns", "Normalize Blank Values"]
+      },
+      {
+        id: "preset_normalize_text",
+        name: "Normalize Text Columns",
+        description: "Trims spaces, collapses internal doubles, and converts names to Title Case.",
+        isBuiltIn: true,
+        operations: ["Trim All Whitespace", "Normalize Internal Spaces", "Convert to Title Case"]
+      }
+    ];
+
+    // --- DATA QUALITY ANALYZER (Section 7) ---
+    function analyzeQuality(dataset) {
+      if (!dataset || !dataset.rows || dataset.rows.length === 0) {
+        return { score: 100, formula: "100 - penalties", emptyRows: 0, duplicateRows: 0, emptyCells: 0, totalCells: 0, categories: [] };
+      }
+
+      const totalRows = dataset.rows.length;
+      const totalCols = dataset.columns.length;
+      const totalCells = totalRows * totalCols;
+
+      let emptyRows = 0;
+      let emptyCells = 0;
+      let unpaddedWhitespace = 0;
+      let duplicateRows = 0;
+      const seenRows = new Set();
+
+      dataset.rows.forEach(row => {
+        if (row.every(c => !c || c.toString().trim() === '')) emptyRows++;
+        const fp = row.join('\0');
+        if (seenRows.has(fp)) duplicateRows++;
+        else seenRows.add(fp);
+      });
+
+      const categories = [];
+      const missingIssues = [];
+      const duplicateIssues = [];
+      const textIssues = [];
+      const numericIssues = [];
+      const dateIssues = [];
+      const contactIssues = [];
+
+      // Check cells
+      dataset.columns.forEach((col, cIdx) => {
+        let colEmpty = 0;
+        let colDirtyNums = 0;
+        let colMixedDates = 0;
+        let colBadEmails = 0;
+        let colSuspiciousPhones = 0;
+
+        dataset.rows.forEach(row => {
+          const val = (row[cIdx] || '').toString();
+          if (val === '' || val.trim() === '') {
+            emptyCells++;
+            colEmpty++;
+          } else {
+            if (val.startsWith(' ') || val.endsWith(' ')) unpaddedWhitespace++;
+            if (val.includes('  ')) textIssues.push({ title: 'Repeated internal spaces', col });
+            
+            // Numbers
+            if ((val.includes('$') || val.includes('€') || val.includes(',')) && !isNaN(parseFloat(val.replace(/[\$,€]/g, '')))) {
+              colDirtyNums++;
+            }
+            // Dates
+            if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(val) || /\d{1,2}-[A-Za-z]{3}-\d{4}/.test(val)) {
+              colMixedDates++;
+            }
+            // Emails
+            if (col.toLowerCase().includes('email')) {
+              const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+              if (!emailRegex.test(val.trim())) colBadEmails++;
+            }
+            // Phones
+            if (col.toLowerCase().includes('phone')) {
+              const digits = val.replace(/\D/g, '');
+              if (digits.length < 7 || digits.length > 15) colSuspiciousPhones++;
+            }
+          }
+        });
+
+        if (colDirtyNums > 0) {
+          numericIssues.push({ id: `num_${col}`, title: `Formatted Numbers / Currencies in '${col}'`, count: colDirtyNums, severity: 'WARNING', col, op: 'Clean & Convert to Numeric' });
+        }
+        if (colMixedDates > 0) {
+          dateIssues.push({ id: `date_${col}`, title: `Non-ISO Date Formats in '${col}'`, count: colMixedDates, severity: 'WARNING', col, op: 'Standardize Dates to ISO' });
+        }
+        if (colBadEmails > 0) {
+          contactIssues.push({ id: `email_${col}`, title: `Invalid Email Formats in '${col}'`, count: colBadEmails, severity: 'ERROR', col, op: 'Clean Email Addresses' });
+        }
+        if (colSuspiciousPhones > 0) {
+          contactIssues.push({ id: `phone_${col}`, title: `Suspicious Phone Numbers in '${col}'`, count: colSuspiciousPhones, severity: 'WARNING', col, op: 'Standardize Phone Numbers' });
+        }
+      });
+
+      if (emptyRows > 0) {
+        missingIssues.push({ id: 'empty_rows', title: 'Fully Empty Rows', count: emptyRows, severity: 'ERROR', op: 'Remove Empty Rows' });
+      }
+      if (emptyCells > 0) {
+        missingIssues.push({ id: 'empty_cells', title: 'Blank / Null Cells', count: emptyCells, severity: 'WARNING', op: 'Normalize Blank Values' });
+      }
+      if (duplicateRows > 0) {
+        duplicateIssues.push({ id: 'dup_rows', title: 'Exact Duplicate Rows', count: duplicateRows, severity: 'ERROR', op: 'Remove Exact Duplicate Rows' });
+      }
+      if (unpaddedWhitespace > 0) {
+        textIssues.push({ id: 'whitespace', title: 'Leading / Trailing Whitespace', count: unpaddedWhitespace, severity: 'WARNING', op: 'Trim All Whitespace' });
+      }
+
+      if (missingIssues.length > 0) categories.push({ name: 'Missing Data', issues: missingIssues });
+      if (duplicateIssues.length > 0) categories.push({ name: 'Duplicates', issues: duplicateIssues });
+      if (textIssues.length > 0) categories.push({ name: 'Text Quality', issues: textIssues });
+      if (numericIssues.length > 0) categories.push({ name: 'Numeric Quality', issues: numericIssues });
+      if (dateIssues.length > 0) categories.push({ name: 'Date Standardization', issues: dateIssues });
+      if (contactIssues.length > 0) categories.push({ name: 'Contact Data', issues: contactIssues });
+
+      // Documented score formula:
+      const emptyRatio = Math.min(1, emptyCells / Math.max(1, totalCells));
+      const dupRatio = Math.min(1, duplicateRows / Math.max(1, totalRows));
+      const wsRatio = Math.min(1, unpaddedWhitespace / Math.max(1, totalCells));
+      const penalty = (emptyRatio * 30) + (dupRatio * 30) + (wsRatio * 20) + (missingIssues.filter(i => i.severity === 'ERROR').length * 5);
+      const score = Math.max(15, Math.min(100, Math.round(100 - penalty)));
+
+      return {
+        score,
+        formula: "100 - (emptyCells × 30% + duplicateRows × 30% + whitespace × 20% + criticalErrors × 5%)",
+        emptyRows,
+        duplicateRows,
+        emptyCells,
+        totalCells,
+        totalIssues: categories.reduce((sum, cat) => sum + cat.issues.length, 0),
+        categories
+      };
+    }
+
+    // --- CLEANING OPERATIONS ENGINE (Section 8) ---
+    function applyOperation(dataset, opName) {
+      if (!dataset || !dataset.rows) return dataset;
+      let newRows = dataset.rows.map(r => [...r]);
+      let newCols = [...dataset.columns];
+
+      switch (opName) {
+        case "Remove Empty Rows":
+          newRows = newRows.filter(r => r.some(c => c && c.toString().trim() !== ''));
+          break;
+
+        case "Remove Empty Columns":
+          const keepIndices = newCols.map((_, idx) => idx).filter(idx => newRows.some(r => r[idx] && r[idx].toString().trim() !== ''));
+          newCols = keepIndices.map(idx => newCols[idx]);
+          newRows = newRows.map(r => keepIndices.map(idx => r[idx] || ''));
+          break;
+
+        case "Remove Exact Duplicate Rows":
+          const seen = new Set();
+          const deduped = [];
+          newRows.forEach(row => {
+            const key = row.join('\0');
+            if (!seen.has(key)) {
+              seen.add(key);
+              deduped.push(row);
+            }
+          });
+          newRows = deduped;
+          break;
+
+        case "Trim All Whitespace":
+          newRows = newRows.map(r => r.map(c => (c || '').toString().trim()));
+          break;
+
+        case "Normalize Internal Spaces":
+          newRows = newRows.map(r => r.map(c => (c || '').toString().replace(/\s+/g, ' ')));
+          break;
+
+        case "Convert to Lowercase":
+          newRows = newRows.map(r => r.map(c => (c || '').toString().toLowerCase()));
+          break;
+
+        case "Convert to Uppercase":
+          newRows = newRows.map(r => r.map(c => (c || '').toString().toUpperCase()));
+          break;
+
+        case "Convert to Title Case":
+          newRows = newRows.map(r => r.map(c => {
+            const str = (c || '').toString();
+            return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+          }));
+          break;
+
+        case "Normalize Blank Values":
+          newRows = newRows.map(r => r.map(c => {
+            const trimmed = (c || '').toString().trim().toLowerCase();
+            return (trimmed === '' || trimmed === 'null' || trimmed === 'none' || trimmed === 'n/a') ? '' : c;
+          }));
+          break;
+
+        case "Clean & Convert to Numeric":
+          newRows = newRows.map(r => r.map(c => {
+            const str = (c || '').toString().trim();
+            if (str.includes('$') || str.includes('€') || str.includes(',')) {
+              const cleaned = str.replace(/[\$,€]/g, '').trim();
+              const num = parseFloat(cleaned);
+              return !isNaN(num) ? num.toString() : str;
+            }
+            return c;
+          }));
+          break;
+
+        case "Standardize Dates to ISO":
+          newRows = newRows.map(r => r.map(c => {
+            const str = (c || '').toString().trim();
+            // Check MM/DD/YYYY
+            const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+            if (m) {
+              const month = m[1].padStart(2, '0');
+              const day = m[2].padStart(2, '0');
+              return `${m[3]}-${month}-${day}`;
+            }
+            return c;
+          }));
+          break;
+
+        case "Clean Email Addresses":
+          const emailColIdx = newCols.findIndex(c => c.toLowerCase().includes('email'));
+          if (emailColIdx !== -1) {
+            newRows = newRows.map(r => {
+              const email = (r[emailColIdx] || '').toString().trim().toLowerCase();
+              r[emailColIdx] = email;
+              return r;
+            });
+          }
+          break;
+
+        case "Standardize Phone Numbers":
+          const phoneColIdx = newCols.findIndex(c => c.toLowerCase().includes('phone'));
+          if (phoneColIdx !== -1) {
+            newRows = newRows.map(r => {
+              const digits = (r[phoneColIdx] || '').toString().replace(/\D/g, '');
+              if (digits.length === 10) {
+                r[phoneColIdx] = `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+              }
+              return r;
+            });
+          }
+          break;
+
+        case "Fill Blanks with N/A":
+          newRows = newRows.map(r => r.map(c => (c === '' || c == null || c.toString().trim() === '') ? 'N/A' : c));
+          break;
+
+        default:
+          break;
+      }
+
+      return {
+        ...dataset,
+        columns: newCols,
+        rows: newRows
+      };
+    }
+
+    // --- MAIN APP COMPONENT ---
+    function TabloraApp() {
+      const [currentScreen, setCurrentScreen] = useState('dashboard');
+      const [dataset, setDataset] = useState(SAMPLE_DATASETS.customers);
+      const [originalDataset, setOriginalDataset] = useState(SAMPLE_DATASETS.customers);
+      const [undoStack, setUndoStack] = useState([]);
+      const [redoStack, setRedoStack] = useState([]);
+      const [appliedOps, setAppliedOps] = useState([]);
+      const [presets, setPresets] = useState(() => {
+        try {
+          const saved = localStorage.getItem('tablora_presets');
+          return saved ? JSON.parse(saved) : DEFAULT_PRESETS;
+        } catch (_) { return DEFAULT_PRESETS; }
+      });
+      const [history, setHistory] = useState(() => {
+        try {
+          const saved = localStorage.getItem('tablora_history');
+          return saved ? JSON.parse(saved) : [];
+        } catch (_) { return []; }
+      });
+      const [density, setDensity] = useState('normal');
+      const [defaultFormat, setDefaultFormat] = useState('CSV');
+      const [searchQuery, setSearchQuery] = useState('');
+      const [sortCol, setSortCol] = useState(null);
+      const [sortAsc, setSortAsc] = useState(true);
+      const [currentPage, setCurrentPage] = useState(0);
+      const [pageSize, setPageSize] = useState(20);
+      const [activeModal, setActiveModal] = useState(null);
+      const [pendingOp, setPendingOp] = useState(null);
+      const [aiPrompt, setAiPrompt] = useState('');
+      const [aiPlan, setAiPlan] = useState(null);
+      const [toastMsg, setToastMsg] = useState(null);
+      const [isDragging, setIsDragging] = useState(false);
+
+      const fileInputRef = useRef(null);
+
+      // Re-initialize Lucide icons after renders
+      useEffect(() => {
+        if (window.lucide) {
+          window.lucide.createIcons();
+        }
+      });
+
+      // Show toast helper
+      const showToast = (msg) => {
+        setToastMsg(msg);
+        setTimeout(() => setToastMsg(null), 3500);
+      };
+
+      // Quality Report
+      const qualityReport = useMemo(() => analyzeQuality(dataset), [dataset]);
+
+      // Load Dataset
+      const loadDataset = (newDs) => {
+        setDataset(newDs);
+        setOriginalDataset(newDs);
+        setUndoStack([]);
+        setRedoStack([]);
+        setAppliedOps([]);
+        setSearchQuery('');
+        setSortCol(null);
+        setCurrentPage(0);
+        showToast(`Loaded ${newDs.rows.length} rows from ${newDs.name}`);
+      };
+
+      // Handle File Upload (CSV & XLSX via SheetJS / PapaParse)
+      const handleFile = (file) => {
+        if (!file) return;
+        if (file.size > 20 * 1024 * 1024) {
+          showToast("File exceeds 20 MB size limit.");
+          return;
+        }
+
+        const fileName = file.name;
+        const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+
+        if (isExcel) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const data = new Uint8Array(e.target.result);
+              const workbook = window.XLSX.read(data, { type: 'array' });
+              const sheetName = workbook.SheetNames[0];
+              const worksheet = workbook.Sheets[sheetName];
+              const json = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+              if (json && json.length > 0) {
+                const columns = (json[0] || []).map((c, i) => (c || `Column_${i+1}`).toString().trim());
+                const rows = json.slice(1).map(r => columns.map((_, i) => (r[i] != null ? r[i].toString() : '')));
+                loadDataset({ name: fileName, format: 'XLSX', columns, rows });
+                setCurrentScreen('workspace');
+              }
+            } catch (err) {
+              showToast("Failed to parse Excel workbook: " + err.message);
+            }
+          };
+          reader.readAsArrayBuffer(file);
+        } else {
+          window.Papa.parse(file, {
+            skipEmptyLines: false,
+            complete: (results) => {
+              if (results.data && results.data.length > 0) {
+                const columns = (results.data[0] || []).map((c, i) => (c || `Column_${i+1}`).toString().trim());
+                const rows = results.data.slice(1).map(r => columns.map((_, i) => (r[i] != null ? r[i].toString() : '')));
+                loadDataset({ name: fileName, format: 'CSV', columns, rows });
+                setCurrentScreen('workspace');
+              }
+            },
+            error: (err) => showToast("CSV parsing error: " + err.message)
+          });
+        }
+      };
+
+      // Preview & Apply Operation
+      const executeOp = (opName) => {
+        setUndoStack(prev => [...prev, dataset]);
+        setRedoStack([]);
+        const updated = applyOperation(dataset, opName);
+        setDataset(updated);
+        setAppliedOps(prev => [...prev, opName]);
+        setActiveModal(null);
+        showToast(`Applied: ${opName}`);
+      };
+
+      // Undo / Redo / Reset
+      const handleUndo = () => {
+        if (undoStack.length === 0) return;
+        const previous = undoStack[undoStack.length - 1];
+        setRedoStack(prev => [dataset, ...prev]);
+        setUndoStack(prev => prev.slice(0, -1));
+        setDataset(previous);
+        setAppliedOps(prev => prev.slice(0, -1));
+        showToast("Undid last operation");
+      };
+
+      const handleRedo = () => {
+        if (redoStack.length === 0) return;
+        const next = redoStack[0];
+        setUndoStack(prev => [...prev, dataset]);
+        setRedoStack(prev => prev.slice(1));
+        setDataset(next);
+        showToast("Redid operation");
+      };
+
+      const handleReset = () => {
+        if (!originalDataset) return;
+        setUndoStack(prev => [...prev, dataset]);
+        setRedoStack([]);
+        setDataset(originalDataset);
+        setAppliedOps([]);
+        showToast("Reset to original dataset");
+      };
+
+      // Export file (CSV or XLSX)
+      const exportFile = (format) => {
+        const baseName = dataset.name.replace(/\.[^/.]+$/, "");
+        const exportName = `${baseName}_cleaned.${format.toLowerCase()}`;
+
+        if (format === 'XLSX') {
+          const wsData = [dataset.columns, ...dataset.rows];
+          const ws = window.XLSX.utils.aoa_to_sheet(wsData);
+          const wb = window.XLSX.utils.book_new();
+          window.XLSX.utils.book_append_sheet(wb, ws, "Cleaned Data");
+          window.XLSX.writeFile(wb, exportName);
+        } else {
+          const csvText = window.Papa.unparse({ fields: dataset.columns, data: dataset.rows });
+          const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.setAttribute("download", exportName);
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+
+        // Add to history
+        const newHistoryItem = {
+          id: Date.now().toString(),
+          timestamp: Date.now(),
+          filename: exportName,
+          originalRows: originalDataset ? originalDataset.rows.length : dataset.rows.length,
+          finalRows: dataset.rows.length,
+          originalCols: dataset.columns.length,
+          finalCols: dataset.columns.length,
+          operationsCount: appliedOps.length,
+          exportFormat: format
+        };
+        const updatedHistory = [newHistoryItem, ...history].slice(0, 50);
+        setHistory(updatedHistory);
+        localStorage.setItem('tablora_history', JSON.stringify(updatedHistory));
+
+        setActiveModal(null);
+        showToast(`Exported ${exportName} successfully!`);
+      };
+
+      // Filtered & Sorted Rows
+      const displayedRows = useMemo(() => {
+        if (!dataset || !dataset.rows) return [];
+        let rows = dataset.rows;
+
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase().trim();
+          rows = rows.filter(r => r.some(c => (c || '').toString().toLowerCase().includes(q)));
+        }
+
+        if (sortCol) {
+          const colIdx = dataset.columns.indexOf(sortCol);
+          if (colIdx !== -1) {
+            rows = [...rows].sort((a, b) => {
+              const va = a[colIdx] || '';
+              const vb = b[colIdx] || '';
+              const na = parseFloat(va);
+              const nb = parseFloat(vb);
+              if (!isNaN(na) && !isNaN(nb)) {
+                return sortAsc ? na - nb : nb - na;
+              }
+              return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+            });
+          }
+        }
+
+        return rows;
+      }, [dataset, searchQuery, sortCol, sortAsc]);
+
+      const totalPages = Math.max(1, Math.ceil(displayedRows.length / pageSize));
+      const pagedRows = displayedRows.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+
+      // AI Plan Generator (Rule-based NLP & Gemini Schema Proposal)
+      const generateAiPlan = (query) => {
+        const q = query.toLowerCase();
+        const ops = [];
+        let rationale = "";
+
+        if (q.includes("empty") || q.includes("blank")) {
+          ops.push("Remove Empty Rows");
+          rationale += "• Remove fully empty rows to avoid skewed aggregate metrics.\n";
+        }
+        if (q.includes("duplicate") || q.includes("dedup")) {
+          ops.push("Remove Exact Duplicate Rows");
+          rationale += "• Deduplicate identical customer records.\n";
+        }
+        if (q.includes("trim") || q.includes("space") || q.includes("whitespace")) {
+          ops.push("Trim All Whitespace");
+          ops.push("Normalize Internal Spaces");
+          rationale += "• Strip leading/trailing padding and collapse double spaces.\n";
+        }
+        if (q.includes("email")) {
+          ops.push("Clean Email Addresses");
+          rationale += "• Standardize email addresses to lowercase.\n";
+        }
+        if (q.includes("date") || q.includes("iso")) {
+          ops.push("Standardize Dates to ISO");
+          rationale += "• Standardize non-ISO dates to YYYY-MM-DD.\n";
+        }
+        if (q.includes("number") || q.includes("currency") || q.includes("price")) {
+          ops.push("Clean & Convert to Numeric");
+          rationale += "• Strip dollar signs and commas for clean numbers.\n";
+        }
+
+        if (ops.length === 0) {
+          ops.push("Remove Empty Rows", "Remove Exact Duplicate Rows", "Trim All Whitespace");
+          rationale = "• Proposed standard foundational cleaning sequence.";
+        }
+
+        setAiPlan({ query, ops, rationale });
+      };
+
+      return (
+        <div className="flex h-screen overflow-hidden">
+          {/* Toast Notification */}
+          {toastMsg && (
+            <div className="fixed top-4 right-4 z-50 bg-brand-navy text-white px-4 py-2.5 rounded-lg shadow-xl text-sm font-medium flex items-center border border-slate-700 animate-fade-in">
+              <i data-lucide="check-circle" className="w-4 h-4 text-brand-emerald mr-2"></i>
+              {toastMsg}
+            </div>
+          )}
+
+          {/* Collapsible Sidebar */}
+          <aside className="w-64 bg-white border-r border-brand-border flex flex-col justify-between hidden md:flex shrink-0">
+            <div>
+              {/* Brand Logo */}
+              <div className="p-5 border-b border-brand-border flex items-center space-x-3">
+                <div className="w-9 h-9 rounded-lg bg-brand-navy flex items-center justify-center text-brand-sky font-bold shadow-sm">
+                  <i data-lucide="table-2" className="w-5 h-5"></i>
+                </div>
+                <div>
+                  <h1 className="font-bold text-lg text-brand-navy tracking-tight">Tablora</h1>
+                  <p className="text-[11px] text-brand-slate font-medium">Messy data in. Clean data out.</p>
+                </div>
+              </div>
+
+              {/* Navigation Items */}
+              <nav className="p-3 space-y-1">
+                {[
+                  { id: 'dashboard', label: 'Dashboard', icon: 'layout-dashboard' },
+                  { id: 'new_job', label: 'New Cleaning Job', icon: 'file-up' },
+                  { id: 'workspace', label: 'Cleaning Workspace', icon: 'table' },
+                  { id: 'quality', label: 'Data Quality Report', icon: 'badge-check', badge: qualityReport.score < 80 ? 'Issues' : null },
+                  { id: 'presets', label: 'Saved Presets', icon: 'bookmark' },
+                  { id: 'history', label: 'Job History', icon: 'history' },
+                  { id: 'pricing', label: 'Pricing', icon: 'credit-card' },
+                  { id: 'settings', label: 'Settings', icon: 'settings' }
+                ].map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => setCurrentScreen(item.id)}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition ${
+                      currentScreen === item.id
+                        ? 'bg-brand-skyLight text-brand-sky font-semibold'
+                        : 'text-brand-slate hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <i data-lucide={item.icon} className="w-4 h-4"></i>
+                      <span>{item.label}</span>
+                    </div>
+                    {item.badge && (
+                      <span className="text-[10px] bg-brand-amberLight text-brand-amber font-bold px-1.5 py-0.5 rounded">
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </nav>
+            </div>
+
+            {/* Sidebar Footer */}
+            <div className="p-4 border-t border-brand-border bg-slate-50">
+              <div className="flex items-center justify-between text-xs text-brand-slate">
+                <span className="font-medium">Active File:</span>
+                <span className="font-bold text-brand-navy truncate max-w-[120px]">{dataset ? dataset.name : 'None'}</span>
+              </div>
+              <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                <span>{dataset ? `${dataset.rows.length} rows` : '0 rows'}</span>
+                <span className="text-brand-emerald font-semibold">100% On-Device</span>
+              </div>
+            </div>
+          </aside>
+
+          {/* Main Content Area */}
+          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+            {/* Top Header Bar */}
+            <header className="h-14 bg-white border-b border-brand-border px-4 md:px-6 flex items-center justify-between shrink-0">
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => setCurrentScreen(currentScreen === 'dashboard' ? 'workspace' : 'dashboard')}
+                  className="md:hidden p-1.5 text-brand-slate hover:bg-slate-100 rounded-lg"
+                >
+                  <i data-lucide="menu" className="w-5 h-5"></i>
+                </button>
+                <div className="flex items-center space-x-2">
+                  <span className="font-bold text-sm text-brand-navy hidden sm:inline">Tablora</span>
+                  <span className="text-slate-400 hidden sm:inline">•</span>
+                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">
+                    {dataset ? dataset.name : 'No dataset'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handleUndo}
+                  disabled={undoStack.length === 0}
+                  title="Undo"
+                  className="p-1.5 text-brand-slate hover:bg-slate-100 disabled:opacity-30 rounded-lg"
+                >
+                  <i data-lucide="undo" className="w-4 h-4"></i>
+                </button>
+
+                <button
+                  onClick={handleRedo}
+                  disabled={redoStack.length === 0}
+                  title="Redo"
+                  className="p-1.5 text-brand-slate hover:bg-slate-100 disabled:opacity-30 rounded-lg"
+                >
+                  <i data-lucide="redo" className="w-4 h-4"></i>
+                </button>
+
+                <button
+                  onClick={handleReset}
+                  title="Reset to Original"
+                  className="p-1.5 text-brand-slate hover:bg-slate-100 rounded-lg"
+                >
+                  <i data-lucide="rotate-ccw" className="w-4 h-4"></i>
+                </button>
+
+                <div className="h-4 w-[1px] bg-slate-200 mx-1"></div>
+
+                <button
+                  onClick={() => setActiveModal('ai')}
+                  className="flex items-center space-x-1.5 bg-brand-sky hover:bg-sky-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow-sm"
+                >
+                  <i data-lucide="sparkles" className="w-3.5 h-3.5"></i>
+                  <span>Ask Tablora</span>
+                </button>
+
+                <button
+                  onClick={() => setActiveModal('export')}
+                  className="flex items-center space-x-1.5 bg-brand-emerald hover:bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow-sm"
+                >
+                  <i data-lucide="download" className="w-3.5 h-3.5"></i>
+                  <span className="hidden sm:inline">Export</span>
+                </button>
+              </div>
+            </header>
+
+            {/* View Switching */}
+            <main className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-6 bg-brand-bg">
+              {/* --- SCREEN 1: DASHBOARD --- */}
+              {currentScreen === 'dashboard' && (
+                <div className="max-w-6xl mx-auto space-y-6">
+                  {/* Hero Banner */}
+                  <div className="bg-brand-navy text-white rounded-2xl p-6 md:p-8 shadow-sm">
+                    <div className="max-w-2xl">
+                      <span className="inline-block bg-sky-500/20 text-brand-sky text-xs font-bold px-2.5 py-1 rounded tracking-wide mb-3">
+                        AI-POWERED SPREADSHEET CLEANING SAAS
+                      </span>
+                      <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight">
+                        Messy data in. Clean data out.
+                      </h2>
+                      <p className="mt-2 text-slate-300 text-sm leading-relaxed">
+                        Tablora helps freelancers, virtual assistants, ecommerce sellers, sales teams, and researchers clean, validate, transform, and export messy spreadsheet data without writing code.
+                      </p>
+                      <div className="mt-5 flex flex-wrap gap-3">
+                        <button
+                          onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                          className="bg-brand-sky hover:bg-sky-600 text-white font-semibold text-sm px-4 py-2.5 rounded-lg shadow flex items-center space-x-2"
+                        >
+                          <i data-lucide="upload" className="w-4 h-4"></i>
+                          <span>Upload a Spreadsheet</span>
+                        </button>
+                        <button
+                          onClick={() => setCurrentScreen('workspace')}
+                          className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm px-4 py-2.5 rounded-lg border border-slate-700 flex items-center space-x-2"
+                        >
+                          <i data-lucide="table" className="w-4 h-4"></i>
+                          <span>Open Workspace</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Real Computed Statistics (Section 5) */}
+                  <div>
+                    <h3 className="font-bold text-brand-navy text-sm mb-3">Processing Activity (Computed from Local Job Audit Log)</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {[
+                        { label: 'Files Processed', val: new Set(history.map(h => h.filename)).size, icon: 'file' },
+                        { label: 'Jobs Completed', val: history.length, icon: 'check-circle' },
+                        { label: 'Rows Examined', val: history.reduce((sum, h) => sum + h.originalRows, 0), icon: 'rows-3' },
+                        { label: 'Operations Performed', val: history.reduce((sum, h) => sum + h.operationsCount, 0), icon: 'wand-2' }
+                      ].map((stat, i) => (
+                        <div key={i} className="bg-white border border-brand-border rounded-xl p-4 shadow-sm">
+                          <div className="flex items-center space-x-2 text-brand-sky mb-2">
+                            <i data-lucide={stat.icon} className="w-4 h-4"></i>
+                            <span className="text-xs text-brand-slate font-medium">{stat.label}</span>
+                          </div>
+                          <p className="text-2xl font-bold text-brand-navy">{stat.val}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Messy vs Clean Example (Section 5) */}
+                  <div className="bg-white border border-brand-border rounded-xl p-5 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-bold text-sm text-brand-navy">Sample Data Improvement Example</h3>
+                      <span className="text-[11px] bg-slate-100 text-slate-500 font-semibold px-2 py-0.5 rounded">Fictional Sample</span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                      <div className="bg-red-50/60 border border-red-200 rounded-lg p-3.5 space-y-1.5">
+                        <span className="font-bold text-red-600 block text-[11px]">MESSY INPUT DATA</span>
+                        <p className="text-slate-600">• "  Alice Cooper  " (untrimmed padding)</p>
+                        <p className="text-slate-600">• "john.doe@bad-email" (invalid format)</p>
+                        <p className="text-slate-600">• "$1,450.00" (unparsed currency string)</p>
+                        <p className="text-slate-600">• "03/22/2023" (mixed date representation)</p>
+                        <p className="text-slate-600">• Duplicate customer records & empty rows</p>
+                      </div>
+                      <div className="bg-emerald-50/60 border border-emerald-200 rounded-lg p-3.5 space-y-1.5">
+                        <span className="font-bold text-brand-emerald block text-[11px]">CLEAN TABLORA OUTPUT</span>
+                        <p className="text-slate-700">✓ "Alice Cooper" (trimmed & normalized)</p>
+                        <p className="text-slate-700">✓ Validated and formatted to lowercase</p>
+                        <p className="text-slate-700">✓ 1450.00 (clean numeric type)</p>
+                        <p className="text-slate-700">✓ 2023-03-22 (standard ISO format)</p>
+                        <p className="text-slate-700">✓ 0 exact duplicates or blank records</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Quick Start with Sample Data */}
+                  <div className="bg-white border border-brand-border rounded-xl p-5 shadow-sm">
+                    <h3 className="font-bold text-sm text-brand-navy mb-2">Test with Built-in Realistic Datasets</h3>
+                    <p className="text-xs text-brand-slate mb-4">Select a test dataset containing real-world anomalies:</p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {[
+                        { key: 'customers', title: 'Ecommerce Customers', desc: '15 rows • Mixed emails, unpadded names, leading zeros.' },
+                        { key: 'sales', title: 'Sales Pipeline & Deals', desc: '6 deals • Currencies ($45,000), proposal stages, dates.' },
+                        { key: 'inventory', title: 'Inventory SKUs', desc: '5 items • Leading zero codes (004921), stock errors.' }
+                      ].map(ds => (
+                        <div
+                          key={ds.key}
+                          onClick={() => {
+                            loadDataset(SAMPLE_DATASETS[ds.key]);
+                            setCurrentScreen('workspace');
+                          }}
+                          className="border border-brand-border hover:border-brand-sky hover:bg-sky-50/30 cursor-pointer rounded-lg p-3 transition"
+                        >
+                          <h4 className="font-bold text-xs text-brand-navy">{ds.title}</h4>
+                          <p className="text-[11px] text-slate-500 mt-1">{ds.desc}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* --- SCREEN 2: NEW CLEANING JOB --- */}
+              {currentScreen === 'new_job' && (
+                <div className="max-w-4xl mx-auto space-y-6">
+                  <div>
+                    <h2 className="text-xl font-bold text-brand-navy">New Cleaning Job</h2>
+                    <p className="text-xs text-brand-slate">Upload any CSV or Excel file to begin cleaning locally.</p>
+                  </div>
+
+                  {/* Drag and Drop Box */}
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDragging(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                        handleFile(e.dataTransfer.files[0]);
+                      }
+                    }}
+                    className={`border-2 border-dashed rounded-2xl p-8 md:p-12 text-center transition bg-white ${
+                      isDragging ? 'border-brand-sky bg-sky-50' : 'border-slate-300 hover:border-brand-sky'
+                    }`}
+                  >
+                    <div className="w-14 h-14 bg-brand-skyLight text-brand-sky rounded-2xl flex items-center justify-center mx-auto mb-4">
+                      <i data-lucide="upload-cloud" className="w-7 h-7"></i>
+                    </div>
+                    <h3 className="font-bold text-base text-brand-navy">Drag & drop your spreadsheet here</h3>
+                    <p className="text-xs text-brand-slate mt-1 max-w-sm mx-auto">
+                      Supports CSV, XLSX, and XLS workbooks up to 20 MB. Data never leaves your computer.
+                    </p>
+                    <div className="mt-5">
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        accept=".csv,.xlsx,.xls"
+                        onChange={(e) => e.target.files && handleFile(e.target.files[0])}
+                        className="hidden"
+                      />
+                      <button
+                        onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                        className="bg-brand-sky hover:bg-sky-600 text-white font-semibold text-xs px-5 py-2.5 rounded-lg shadow-sm"
+                      >
+                        Browse Files on Device
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* File Size Notice */}
+                  <div className="bg-slate-50 border border-brand-border rounded-xl p-4 flex items-start space-x-3 text-xs text-brand-slate">
+                    <i data-lucide="shield-check" className="w-5 h-5 text-brand-emerald shrink-0 mt-0.5"></i>
+                    <div>
+                      <span className="font-bold text-brand-navy block">Strict Local Processing Privacy</span>
+                      <span>Your files are parsed and transformed directly inside your browser memory using Web APIs. No spreadsheets are transmitted to remote cloud databases.</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* --- SCREEN 3: DATA QUALITY REPORT --- */}
+              {currentScreen === 'quality' && (
+                <div className="max-w-5xl mx-auto space-y-6">
+                  {/* Quality Score Header Card */}
+                  <div className="bg-white border border-brand-border rounded-xl p-6 shadow-sm">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <span className="text-xs font-semibold text-brand-slate uppercase tracking-wider">Quality Assessment</span>
+                        <h2 className="text-xl font-bold text-brand-navy mt-1">Data Health & Issue Audit</h2>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Calculated for <strong className="text-brand-navy">{dataset.name}</strong> ({dataset.rows.length} rows × {dataset.columns.length} columns)
+                        </p>
+                      </div>
+
+                      <div className="flex items-center space-x-4">
+                        <div className={`w-16 h-16 rounded-full flex flex-col items-center justify-center font-black text-2xl border-2 ${
+                          qualityReport.score >= 85 ? 'bg-emerald-50 text-brand-emerald border-brand-emerald' :
+                          qualityReport.score >= 60 ? 'bg-amber-50 text-brand-amber border-brand-amber' :
+                          'bg-rose-50 text-brand-rose border-brand-rose'
+                        }`}>
+                          {qualityReport.score}
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-brand-navy">Overall Score</div>
+                          <div className="text-[11px] text-slate-500 max-w-[200px]">
+                            {qualityReport.score >= 85 ? 'Clean dataset ready for use.' : 'Contains issues requiring cleanup.'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-slate-100 text-[11px] text-slate-500">
+                      <strong>Documented Formula:</strong> {qualityReport.formula}
+                    </div>
+                  </div>
+
+                  {/* Issue Categories */}
+                  <div className="space-y-4">
+                    {qualityReport.categories.map((cat, idx) => (
+                      <div key={idx} className="bg-white border border-brand-border rounded-xl p-5 shadow-sm">
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="font-bold text-sm text-brand-navy">{cat.name}</h3>
+                          <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded">
+                            {cat.issues.length} {cat.issues.length === 1 ? 'issue' : 'issues'}
+                          </span>
+                        </div>
+                        <div className="space-y-3">
+                          {cat.issues.map((issue, iIdx) => (
+                            <div key={iIdx} className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                              <div>
+                                <div className="flex items-center space-x-2">
+                                  <span className="font-bold text-brand-navy">{issue.title}</span>
+                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                    issue.severity === 'ERROR' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                                  }`}>
+                                    {issue.severity === 'ERROR' ? 'Definite Error' : 'Heuristic Warning'}
+                                  </span>
+                                </div>
+                                <span className="text-slate-500 text-[11px] mt-0.5 block">
+                                  Detected {issue.count} affected {issue.count === 1 ? 'cell/row' : 'cells/rows'}.
+                                </span>
+                              </div>
+                              {issue.op && (
+                                <button
+                                  onClick={() => {
+                                    executeOp(issue.op);
+                                    setCurrentScreen('workspace');
+                                  }}
+                                  className="bg-brand-sky hover:bg-sky-600 text-white font-semibold px-3 py-1.5 rounded-lg text-xs whitespace-nowrap self-start sm:self-auto"
+                                >
+                                  Fix with {issue.op}
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* --- SCREEN 4: CLEANING WORKSPACE --- */}
+              {currentScreen === 'workspace' && (
+                <div className="h-full flex flex-col space-y-4">
+                  {/* Controls & Tools Bar */}
+                  <div className="bg-white border border-brand-border rounded-xl p-3 shadow-sm flex flex-wrap items-center justify-between gap-3 shrink-0">
+                    <div className="flex items-center space-x-2 flex-1 min-w-[200px] max-w-sm">
+                      <div className="relative w-full">
+                        <i data-lucide="search" className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5"></i>
+                        <input
+                          type="text"
+                          placeholder="Search cells in dataset..."
+                          value={searchQuery}
+                          onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(0); }}
+                          className="w-full text-xs pl-8 pr-3 py-1.5 border border-brand-border rounded-lg focus:outline-none focus:border-brand-sky"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Operations Dropdown */}
+                    <div className="flex items-center space-x-2">
+                      <select
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            setPendingOp(e.target.value);
+                            setActiveModal('preview');
+                            e.target.value = "";
+                          }
+                        }}
+                        className="text-xs bg-brand-navy text-white font-semibold px-3 py-1.5 rounded-lg cursor-pointer"
+                        defaultValue=""
+                      >
+                        <option value="" disabled>Apply Cleaning Operation ▼</option>
+                        <optgroup label="Rows & Columns">
+                          <option value="Remove Empty Rows">1. Remove Empty Rows</option>
+                          <option value="Remove Empty Columns">2. Remove Empty Columns</option>
+                          <option value="Remove Exact Duplicate Rows">3. Remove Exact Duplicate Rows</option>
+                        </optgroup>
+                        <optgroup label="Text Sanitization">
+                          <option value="Trim All Whitespace">4. Trim All Whitespace</option>
+                          <option value="Normalize Internal Spaces">5. Normalize Internal Spaces</option>
+                          <option value="Convert to Lowercase">6. Convert to Lowercase</option>
+                          <option value="Convert to Uppercase">7. Convert to Uppercase</option>
+                          <option value="Convert to Title Case">8. Convert to Title Case</option>
+                          <option value="Normalize Blank Values">9. Normalize Blanks / Nulls</option>
+                          <option value="Fill Blanks with N/A">10. Fill Blanks with 'N/A'</option>
+                        </optgroup>
+                        <optgroup label="Format Standardization">
+                          <option value="Clean & Convert to Numeric">11. Clean & Convert to Numeric</option>
+                          <option value="Standardize Dates to ISO">12. Standardize Dates to ISO</option>
+                          <option value="Clean Email Addresses">13. Clean Email Addresses</option>
+                          <option value="Standardize Phone Numbers">14. Standardize Phone Numbers</option>
+                        </optgroup>
+                      </select>
+
+                      {/* Density Toggle */}
+                      <button
+                        onClick={() => setDensity(d => d === 'compact' ? 'normal' : d === 'normal' ? 'comfortable' : 'compact')}
+                        title="Toggle Row Density"
+                        className="border border-brand-border px-2.5 py-1.5 rounded-lg text-xs font-medium text-brand-slate hover:bg-slate-50"
+                      >
+                        Density: <strong className="capitalize">{density}</strong>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Data Table */}
+                  <div className="flex-1 bg-white border border-brand-border rounded-xl shadow-sm overflow-hidden flex flex-col">
+                    <div className="flex-1 overflow-auto custom-scrollbar">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-100 border-b border-brand-border sticky top-0 z-10">
+                            <th className="p-2.5 w-12 text-center font-bold text-slate-400 bg-slate-100 border-r border-slate-200">#</th>
+                            {dataset.columns.map((col, idx) => (
+                              <th
+                                key={idx}
+                                onClick={() => {
+                                  if (sortCol === col) setSortAsc(!sortAsc);
+                                  else { setSortCol(col); setSortAsc(true); }
+                                }}
+                                className="p-2.5 font-bold text-brand-navy border-r border-slate-200 hover:bg-slate-200/60 cursor-pointer whitespace-nowrap"
+                              >
+                                <div className="flex items-center justify-between space-x-1">
+                                  <span>{col}</span>
+                                  {sortCol === col && (
+                                    <span className="text-brand-sky font-bold">{sortAsc ? '▲' : '▼'}</span>
+                                  )}
+                                </div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {pagedRows.map((row, rIdx) => {
+                            const globalRowIdx = (currentPage * pageSize) + rIdx + 1;
+                            const isRowEmpty = row.every(c => !c || c.toString().trim() === '');
+                            return (
+                              <tr
+                                key={rIdx}
+                                className={`hover:bg-sky-50/40 transition ${
+                                  isRowEmpty ? 'bg-red-50/40' : rIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'
+                                }`}
+                              >
+                                <td className="p-2 text-center text-slate-400 font-mono text-[11px] border-r border-slate-100 bg-slate-50/50">
+                                  {globalRowIdx}
+                                </td>
+                                {row.map((cell, cIdx) => (
+                                  <td
+                                    key={cIdx}
+                                    className={`border-r border-slate-100 ${
+                                      density === 'compact' ? 'py-1 px-2' : density === 'comfortable' ? 'py-3.5 px-3' : 'py-2 px-2.5'
+                                    } ${
+                                      (!cell || cell.trim() === '') ? 'text-slate-300 italic' : 'text-slate-700'
+                                    }`}
+                                  >
+                                    {(!cell || cell.trim() === '') ? '•' : cell}
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Pagination Bar */}
+                    <div className="h-11 bg-slate-50 border-t border-brand-border px-4 flex items-center justify-between text-xs text-brand-slate shrink-0">
+                      <div>
+                        Showing <strong>{displayedRows.length === 0 ? 0 : (currentPage * pageSize) + 1}</strong> to <strong>{Math.min(displayedRows.length, (currentPage + 1) * pageSize)}</strong> of <strong>{displayedRows.length}</strong> rows
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                          disabled={currentPage === 0}
+                          className="px-2.5 py-1 border border-brand-border bg-white rounded disabled:opacity-30 hover:bg-slate-100"
+                        >
+                          Previous
+                        </button>
+                        <span>Page {currentPage + 1} of {totalPages}</span>
+                        <button
+                          onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                          disabled={currentPage >= totalPages - 1}
+                          className="px-2.5 py-1 border border-brand-border bg-white rounded disabled:opacity-30 hover:bg-slate-100"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* --- SCREEN 5: SAVED PRESETS --- */}
+              {currentScreen === 'presets' && (
+                <div className="max-w-4xl mx-auto space-y-6">
+                  <div>
+                    <h2 className="text-xl font-bold text-brand-navy">Reusable Cleaning Presets</h2>
+                    <p className="text-xs text-brand-slate">Execute multi-step transformations sequentially in one click.</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {presets.map(preset => (
+                      <div key={preset.id} className="bg-white border border-brand-border rounded-xl p-5 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <h3 className="font-bold text-sm text-brand-navy">{preset.name}</h3>
+                            {preset.isBuiltIn && (
+                              <span className="text-[10px] bg-brand-skyLight text-brand-sky font-bold px-2 py-0.5 rounded">Built-in</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500 mb-3">{preset.description}</p>
+                          <div className="bg-slate-50 rounded-lg p-2.5 space-y-1 mb-4">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block">Operations Sequence:</span>
+                            {preset.operations.map((op, i) => (
+                              <div key={i} className="text-xs text-slate-700 flex items-center space-x-1.5">
+                                <span className="text-brand-sky font-bold">{i+1}.</span>
+                                <span>{op}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            let curr = dataset;
+                            preset.operations.forEach(op => {
+                              curr = applyOperation(curr, op);
+                            });
+                            setUndoStack(prev => [...prev, dataset]);
+                            setDataset(curr);
+                            setAppliedOps(prev => [...prev, ...preset.operations]);
+                            setCurrentScreen('workspace');
+                            showToast(`Executed preset: ${preset.name}`);
+                          }}
+                          className="w-full bg-brand-sky hover:bg-sky-600 text-white font-semibold text-xs py-2 rounded-lg"
+                        >
+                          Apply Preset to Dataset
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* --- SCREEN 6: JOB HISTORY --- */}
+              {currentScreen === 'history' && (
+                <div className="max-w-4xl mx-auto space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-xl font-bold text-brand-navy">Cleaning Job History</h2>
+                      <p className="text-xs text-brand-slate">Audit logs of completed spreadsheet exports stored in this browser.</p>
+                    </div>
+                    {history.length > 0 && (
+                      <button
+                        onClick={() => {
+                          setHistory([]);
+                          localStorage.removeItem('tablora_history');
+                          showToast("History cleared");
+                        }}
+                        className="text-xs text-rose-600 hover:text-rose-700 font-semibold border border-rose-200 px-3 py-1.5 rounded-lg"
+                      >
+                        Clear History
+                      </button>
+                    )}
+                  </div>
+
+                  {history.length === 0 ? (
+                    <div className="bg-white border border-brand-border rounded-xl p-8 text-center text-xs text-brand-slate">
+                      No jobs recorded yet. Export a cleaned spreadsheet from the workspace to record your first audit log.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {history.map(item => (
+                        <div key={item.id} className="bg-white border border-brand-border rounded-xl p-4 shadow-sm flex items-center justify-between text-xs">
+                          <div>
+                            <h4 className="font-bold text-brand-navy">{item.filename}</h4>
+                            <p className="text-slate-500 text-[11px] mt-0.5">
+                              {new Date(item.timestamp).toLocaleString()} • {item.operationsCount} operations
+                            </p>
+                          </div>
+                          <div className="flex items-center space-x-3">
+                            <span className="bg-emerald-50 text-brand-emerald font-bold px-2 py-0.5 rounded text-[11px]">
+                              {item.originalRows} → {item.finalRows} rows
+                            </span>
+                            <span className="bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded text-[11px]">
+                              {item.exportFormat}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* --- SCREEN 7: PRICING --- */}
+              {currentScreen === 'pricing' && (
+                <div className="max-w-4xl mx-auto space-y-6">
+                  <div className="text-center max-w-xl mx-auto">
+                    <span className="bg-brand-skyLight text-brand-sky text-xs font-bold px-2.5 py-1 rounded">TRANSPARENT PRICING</span>
+                    <h2 className="text-2xl font-bold text-brand-navy mt-2">Simple, predictable plans</h2>
+                    <p className="text-xs text-brand-slate mt-1">
+                      Tablora is 100% free and fully functional offline today. Future cloud plans are shown below for transparency.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                    {/* Free Core */}
+                    <div className="bg-white border-2 border-brand-sky rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+                      <div>
+                        <span className="text-[11px] font-bold text-brand-sky uppercase tracking-wide">ACTIVE PLAN</span>
+                        <h3 className="text-lg font-bold text-brand-navy mt-1">Free Core</h3>
+                        <div className="mt-3 flex items-baseline">
+                          <span className="text-3xl font-extrabold text-brand-navy">$0</span>
+                          <span className="text-slate-500 text-xs ml-1">/ forever</span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">Complete on-device spreadsheet cleaning for freelancers and teams.</p>
+                        <ul className="mt-5 space-y-2 text-xs text-slate-700">
+                          <li>✓ Full CSV and XLSX import & export</li>
+                          <li>✓ All 22 cleaning operations</li>
+                          <li>✓ Undo, redo, and reset</li>
+                          <li>✓ Deterministic data quality score</li>
+                          <li>✓ 100% private, on-device processing</li>
+                        </ul>
+                      </div>
+                      <button disabled className="w-full mt-6 bg-slate-100 text-slate-500 font-semibold text-xs py-2 rounded-lg cursor-default">
+                        Current Active Plan
+                      </button>
+                    </div>
+
+                    {/* Pro Plan */}
+                    <div className="bg-white border border-brand-border rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">PLANNED CLOUD TIER</span>
+                        <h3 className="text-lg font-bold text-brand-navy mt-1">Pro</h3>
+                        <div className="mt-3 flex items-baseline">
+                          <span className="text-3xl font-extrabold text-brand-navy">$9</span>
+                          <span className="text-slate-500 text-xs ml-1">/ month</span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">For sellers and researchers needing multi-file batch automation.</p>
+                        <ul className="mt-5 space-y-2 text-xs text-slate-500">
+                          <li>✓ Everything in Free Core</li>
+                          <li>• Batch multi-file cleaning (Planned)</li>
+                          <li>• Scheduled automated cloud jobs (Planned)</li>
+                          <li>• Custom regex mapping libraries (Planned)</li>
+                        </ul>
+                      </div>
+                      <button disabled className="w-full mt-6 bg-slate-100 text-slate-400 font-semibold text-xs py-2 rounded-lg cursor-default">
+                        Planned Feature
+                      </button>
+                    </div>
+
+                    {/* Business Plan */}
+                    <div className="bg-white border border-brand-border rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">PLANNED CLOUD TIER</span>
+                        <h3 className="text-lg font-bold text-brand-navy mt-1">Business</h3>
+                        <div className="mt-3 flex items-baseline">
+                          <span className="text-3xl font-extrabold text-brand-navy">$19</span>
+                          <span className="text-slate-500 text-xs ml-1">/ month</span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">For agencies and operations managing high-volume client datasets.</p>
+                        <ul className="mt-5 space-y-2 text-xs text-slate-500">
+                          <li>✓ Everything in Pro</li>
+                          <li>• Collaborative team presets (Planned)</li>
+                          <li>• Custom ERP & CRM connectors (Planned)</li>
+                          <li>• Dedicated priority processing (Planned)</li>
+                        </ul>
+                      </div>
+                      <button disabled className="w-full mt-6 bg-slate-100 text-slate-400 font-semibold text-xs py-2 rounded-lg cursor-default">
+                        Planned Feature
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* --- SCREEN 8: SETTINGS --- */}
+              {currentScreen === 'settings' && (
+                <div className="max-w-3xl mx-auto space-y-6">
+                  <div>
+                    <h2 className="text-xl font-bold text-brand-navy">Preferences & Privacy</h2>
+                    <p className="text-xs text-brand-slate">Configure application defaults and manage local storage.</p>
+                  </div>
+
+                  <div className="bg-white border border-brand-border rounded-xl p-5 shadow-sm space-y-4">
+                    <h3 className="font-bold text-sm text-brand-navy">Display Preferences</h3>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-brand-slate">Table Row Density</span>
+                      <div className="flex space-x-2">
+                        {['compact', 'normal', 'comfortable'].map(d => (
+                          <button
+                            key={d}
+                            onClick={() => setDensity(d)}
+                            className={`px-3 py-1.5 rounded-lg border text-xs capitalize ${
+                              density === d ? 'bg-brand-sky text-white border-brand-sky font-semibold' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            {d}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-brand-border rounded-xl p-5 shadow-sm space-y-4">
+                    <h3 className="font-bold text-sm text-brand-navy">Export Defaults</h3>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-brand-slate">Default Export File Format</span>
+                      <div className="flex space-x-2">
+                        {['CSV', 'XLSX'].map(f => (
+                          <button
+                            key={f}
+                            onClick={() => setDefaultFormat(f)}
+                            className={`px-3 py-1.5 rounded-lg border text-xs ${
+                              defaultFormat === f ? 'bg-brand-sky text-white border-brand-sky font-semibold' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            {f}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 border border-brand-border rounded-xl p-5 shadow-sm space-y-3">
+                    <h3 className="font-bold text-sm text-brand-navy flex items-center space-x-2">
+                      <i data-lucide="shield" className="w-4 h-4 text-brand-sky"></i>
+                      <span>Privacy Architecture Statement</span>
+                    </h3>
+                    <p className="text-xs text-brand-slate leading-relaxed">
+                      • On-Device Core: 100% of spreadsheet parsing, deduplication, cleaning operations, and file exports execute locally in client memory.<br/>
+                      • Local Persistence: Preferences, cleaning presets, and job metadata are saved to your device's local storage and never automatically synced.<br/>
+                      • Zero Account Requirement: No account, login, or tracking cookies are required.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </main>
+          </div>
+
+          {/* Operation Preview Diff Modal (Section 6 & 8) */}
+          {activeModal === 'preview' && pendingOp && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-brand-border">
+                <h3 className="font-bold text-base text-brand-navy">Confirm Operation</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  You are about to apply <strong>{pendingOp}</strong>.
+                </p>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 my-4 text-xs text-slate-700">
+                  This operation modifies dataset rows in memory. You can always undo or reset back to the original dataset.
+                </div>
+                <div className="flex justify-end space-x-2">
+                  <button
+                    onClick={() => setActiveModal(null)}
+                    className="px-4 py-2 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg text-xs font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => executeOp(pendingOp)}
+                    className="px-4 py-2 bg-brand-sky hover:bg-sky-600 text-white rounded-lg text-xs font-semibold"
+                  >
+                    Confirm & Apply
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Ask Tablora AI Modal (Section 9) */}
+          {activeModal === 'ai' && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-brand-border">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-7 h-7 rounded-lg bg-brand-sky flex items-center justify-center text-white">
+                      <i data-lucide="sparkles" className="w-4 h-4"></i>
+                    </div>
+                    <h3 className="font-bold text-base text-brand-navy">Ask Tablora</h3>
+                  </div>
+                  <button onClick={() => { setActiveModal(null); setAiPlan(null); }} className="text-slate-400 hover:text-slate-600">
+                    <i data-lucide="x" className="w-5 h-5"></i>
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 mb-4">
+                  Describe what you want to clean in plain English. Tablora generates a structured plan for your approval.
+                </p>
+
+                <textarea
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  placeholder="e.g. Remove duplicate customers by email and standardize dates to ISO format..."
+                  rows="3"
+                  className="w-full text-xs p-3 border border-brand-border rounded-lg focus:outline-none focus:border-brand-sky mb-3"
+                ></textarea>
+
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  {[
+                    "Remove duplicate rows and trim spaces",
+                    "Clean and lowercase email addresses",
+                    "Standardize all dates to ISO format",
+                    "Clean currencies and convert numbers"
+                  ].map((s, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setAiPrompt(s)}
+                      className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+
+                {aiPlan ? (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4">
+                    <span className="font-bold text-xs text-brand-emerald block mb-1">PROPOSED CLEANING PLAN</span>
+                    <pre className="text-xs text-slate-700 whitespace-pre-wrap font-sans mb-3">{aiPlan.rationale}</pre>
+                    <button
+                      onClick={() => {
+                        let curr = dataset;
+                        aiPlan.ops.forEach(op => { curr = applyOperation(curr, op); });
+                        setUndoStack(prev => [...prev, dataset]);
+                        setDataset(curr);
+                        setAppliedOps(prev => [...prev, ...aiPlan.ops]);
+                        setActiveModal(null);
+                        setAiPlan(null);
+                        showToast(`Applied ${aiPlan.ops.length} AI cleaning operations!`);
+                      }}
+                      className="w-full bg-brand-emerald hover:bg-emerald-600 text-white font-semibold text-xs py-2 rounded-lg"
+                    >
+                      Approve & Execute Plan ({aiPlan.ops.length} steps)
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { if (aiPrompt.trim()) generateAiPlan(aiPrompt); }}
+                    className="w-full bg-brand-sky hover:bg-sky-600 text-white font-semibold text-xs py-2 rounded-lg"
+                  >
+                    Generate Cleaning Plan
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Export Center Modal (Section 11) */}
+          {activeModal === 'export' && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-brand-border">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-bold text-base text-brand-navy">Export Clean Dataset</h3>
+                  <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600">
+                    <i data-lucide="x" className="w-5 h-5"></i>
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 mb-4">
+                  Export your transformed dataset ({dataset.rows.length} rows × {dataset.columns.length} columns) to CSV or Excel.
+                </p>
+
+                <div className="space-y-3 mb-5">
+                  <button
+                    onClick={() => exportFile('CSV')}
+                    className="w-full flex items-center justify-between p-3.5 border border-brand-border hover:border-brand-sky hover:bg-sky-50/40 rounded-xl transition text-left"
+                  >
+                    <div>
+                      <h4 className="font-bold text-xs text-brand-navy">CSV (Comma-Separated Values)</h4>
+                      <p className="text-[11px] text-slate-500">Universal text file. RFC-4180 compliant escaping.</p>
+                    </div>
+                    <i data-lucide="download" className="w-4 h-4 text-brand-sky"></i>
+                  </button>
+
+                  <button
+                    onClick={() => exportFile('XLSX')}
+                    className="w-full flex items-center justify-between p-3.5 border border-brand-border hover:border-brand-emerald hover:bg-emerald-50/40 rounded-xl transition text-left"
+                  >
+                    <div>
+                      <h4 className="font-bold text-xs text-brand-navy">Microsoft Excel Workbook (.xlsx)</h4>
+                      <p className="text-[11px] text-slate-500">Native OpenXML workbook compatible with Excel & Sheets.</p>
+                    </div>
+                    <i data-lucide="download" className="w-4 h-4 text-brand-emerald"></i>
+                  </button>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => setActiveModal(null)}
+                    className="px-4 py-2 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg text-xs font-semibold"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<TabloraApp />);
+  </script>
+</body>
+</html>
