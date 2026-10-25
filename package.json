@@ -4,7 +4,7 @@
   "private": true,
   "description": "Tablora — An AI-Powered Spreadsheet Cleaning SaaS. Messy data in. Clean data out.",
   "scripts": {
-    "build": "mkdir -p dist && cp index.html dist/ 2>/dev/null || cp index.html dist/",
-    "start": "serve ."
+    "build": "mkdir -p dist && cp index.html dist/index.html && mkdir -p public && cp index.html public/index.html",
+    "start": "serve public"
   }
 }
